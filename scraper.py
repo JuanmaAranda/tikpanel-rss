@@ -4,10 +4,9 @@ from bs4 import BeautifulSoup
 from feedgen.feed import FeedGenerator
 from datetime import datetime
 import hashlib
+import time
 
 URL = "https://tikpanel.app/noticias/index.php"
-# Palabras clave optimizadas para el catálogo de Unsplash
-TECH_KEYWORDS = ["tiktok", "smartphone", "streaming", "live", "app", "technology"]
 
 def scrape_news():
     headers = {
@@ -73,27 +72,24 @@ def scrape_news():
         if not desc or len(desc) < 10:
             desc = f"Últimas novedades publicadas en la sección de noticias de TikPanel: {title}."
 
-        # LA SOLUCIÓN ESTABLE: API Oficial de Unsplash vía CDN (Fastly)
-        # Generamos una semilla única por noticia
-        hash_seed = int(hashlib.md5(title.encode('utf-8')).hexdigest(), 16) % 100
-        keyword = TECH_KEYWORDS[hash_seed % len(TECH_KEYWORDS)]
-        
-        # Lista de IDs de fotos reales de Unsplash seleccionadas a mano sobre TikTok/Tech para que vayan rotando
-        # Esto evita llamadas a buscadores rotos. Cada noticia se asocia a un ID real e indestructible.
+        # IDs manuales de Unsplash (Móviles, streaming, setups e interfaces de apps)
         unsplash_ids = [
-            "m_HRfLhgABo", # Smartphone / Redes
-            "gM3Y_c2IM6c", # Interfaz / Móvil
-            "XJXWaeSaQko", # Streaming en directo
-            "84g7b4mUiAs", # Teléfono / Mano
-            "y3aP9oo9P7Y", # Luces de streaming / Neon
-            "I6wCDWOBm-0", # Grabación / Creador
-            "O9N9Go7f77Y", # Social Media
-            "K9om9oo9P7k"  # Gadgets / Tech
+            "1511707171634-5f897ff02aa9", # Smartphone rosa/tecnología
+            "1611162617213-7d7a39e9b1d7", # Icono de TikTok/Redes en pantalla
+            "1516321318423-f06f85e504b3", # Pantalla digital/App
+            "1616469829581-73993eb86b02", # Teléfono móvil en mano
+            "1542751371-adc38448a05e", # Pantalla de streaming/Gaming
+            "1563986768609-322da13575f3", # Interfaz móvil / Mobile app
+            "1611605698335-8b15d27e83f9", # Redes sociales en smartphone
+            "1460925895917-afdab827c52f"  # Analíticas / Panel de control tech
         ]
-        photo_id = unsplash_ids[hash_seed % len(unsplash_ids)]
         
-        # Construimos la URL usando las imágenes oficiales optimizadas para web de Unsplash (800x450)
-        image_url = f"https://images.unsplash.com/photo-{photo_id}?auto=format&fit=crop&w=800&h=450&q=80"
+        hash_seed = int(hashlib.md5(title.encode('utf-8')).hexdigest(), 16) % len(unsplash_ids)
+        photo_id = unsplash_ids[hash_seed]
+        
+        # Añadimos `&cb=` con el timestamp actual. Esto destruye la caché del lector RSS de raíz
+        cache_buster = int(time.time())
+        image_url = f"https://images.unsplash.com/photo-{photo_id}?auto=format&fit=crop&w=800&h=450&q=80&cb={cache_buster}"
 
         stable_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -113,7 +109,7 @@ def generate_rss(articles):
     fg.title("TikPanel Noticias")
     fg.author({'name': 'Juanma Aranda'})
     fg.link(href=URL, rel='alternate')
-    fg.subtitle('Feed RSS automático con cobertura multimedia sobre TikTok y directos.')
+    fg.subtitle('Feed RSS automático enfocado en TikTok y herramientas de streaming.')
     fg.language('es')
 
     for article in articles:
@@ -132,7 +128,7 @@ def generate_rss(articles):
         fe.pubDate(article['date'].astimezone().strftime('%a, %d %b %Y %H:%M:%S %z'))
 
     fg.rss_file('feed.xml', pretty=True)
-    print(f"¡Feed generado con éxito con {len(articles)} imágenes estables!")
+    print(f"¡Feed regenerado con bypass de caché para imágenes!")
 
 if __name__ == "__main__":
     news = scrape_news()
