@@ -1,0 +1,37 @@
+name: Actualizar RSS Automático
+
+on:
+  schedule:
+    # Se ejecutará automáticamente cada 2 horas (puedes cambiarlo si quieres)
+    - cron: '0 */2 * * *'
+  workflow_dispatch: # Esto te permite activar el script manualmente cuando quieras
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Permiso crucial para que GitHub pueda guardar el archivo feed.xml
+
+    steps:
+    - name: Clonar el repositorio
+      uses: actions/checkout@v4
+
+    - name: Configurar Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Instalar librerías necesarias
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Ejecutar el script extractor
+      run: python scraper.py
+
+    - name: Guardar cambios y subir el RSS al repositorio
+      run: |
+        git config --global user.name "GitHub Action"
+        git config --global user.email "actions@github.com"
+        git add feed.xml
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Actualización automática del feed RSS" && git push)
