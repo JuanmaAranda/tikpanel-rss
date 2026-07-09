@@ -1,11 +1,10 @@
 import os
 import re
+import html
 import requests
 from bs4 import BeautifulSoup
 from feedgen.feed import FeedGenerator
 from datetime import datetime
-from html import unescape
-import hashlib
 import time
 
 URL = "https://tikpanel.app/noticias/index.php"
@@ -14,68 +13,34 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-# Cache de imágenes por URL de artículo para no descargar el mismo post dos veces
-_image_cache = {}
-
 
 def extraer_og_image(article_url):
-    """Entra al post publicado y devuelve la imagen destacada (og:image) que el
-    panel guardó en los metadatos. Prueba og:image, og:image:secure_url y
-    twitter:image. Devuelve '' si el post no tiene ninguna."""
-    if article_url in _image_cache:
-        return _image_cache[article_url]
+    """Descarga la noticia y devuelve su imagen original (og:image / twitter:image).
 
-    img = ""
+    Cada post publicado en TikPanel ya incluye la imagen de la fuente original en sus
+    metadatos Open Graph (los añade panel/backfill_og.php). Aquí simplemente la leemos
+    en lugar de inventar una imagen aleatoria.
+    """
     try:
         resp = requests.get(article_url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
-        html = resp.text
-
-        patrones = [
-            r'<meta[^>]+(?:property|name)=["\']og:image(?::secure_url|:url)?["\'][^>]*content=["\']([^"\']+)["\']',
-            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\']og:image(?::secure_url|:url)?["\']',
-            r'<meta[^>]+name=["\']twitter:image(?::src)?["\'][^>]*content=["\']([^"\']+)["\']',
-        ]
-        for patron in patrones:
-            m = re.search(patron, html, re.IGNORECASE)
-            if m:
-                img = unescape(m.group(1)).strip()
-                break
-
-        # Normalizar a URL absoluta por si acaso
-        if img.startswith("//"):
-            img = "https:" + img
-        elif img and not re.match(r"^https?://", img, re.IGNORECASE):
-            img = "https://tikpanel.app" + (img if img.startswith("/") else "/" + img)
-
     except Exception as e:
-        print(f"  ⚠️ No se pudo leer og:image de {article_url}: {e}")
+        print(f"  No se pudo leer la imagen de {article_url}: {e}")
+        return ""
 
-    _image_cache[article_url] = img
-    return img
-
-
-# Respaldo: galería de imágenes fijas de tecnología, SOLO si un post no tiene og:image
-FALLBACK_UNSPLASH_IDS = [
-    "1511707171634-5f897ff02aa9", "1611162617213-7d7a39e9b1d7", "1516321318423-f06f85e504b3",
-    "1616469829581-73993eb86b02", "1542751371-adc38448a05e", "1563986768609-322da13575f3",
-    "1611605698335-8b15d27e83f9", "1460925895917-afdab827c52f", "1611162616305-c47c3ae6302e",
-    "1526374965328-7f61d4dc18c5", "1550751827-4bd374c3f58b", "1531297484001-80022131f5a1",
-    "1618005182384-a83a8bd57fbe", "1607604276583-eef5d076aa5f", "1588702547919-201b11722234",
-    "1614064641938-3bbee52942c7", "1573164713988-8665fc963095", "1562577309-4932fdd64cd1",
-    "1544197150-b99a580bb7a8", "1519389950473-47ba0277781c", "1611926653458-09294b3142bf",
-    "1555066931-4365d14bab8c", "1626379616456-b36cff125028", "1547082299-de196ea013d6",
-    "1611162616415-fbd343a4de62", "1568605117036-5fe5e7bab0b7", "1610563166150-b34df4f3bcd6",
-    "1548345680-f5475ea5df84", "1523961131990-5ea7c61b2107", "1611162617254-2a7410f02157"
-]
-
-
-def imagen_fallback(title):
-    """Imagen de respaldo determinista por título (solo si el post no tiene og:image)."""
-    idx = int(hashlib.md5(title.encode("utf-8")).hexdigest(), 16) % len(FALLBACK_UNSPLASH_IDS)
-    photo_id = FALLBACK_UNSPLASH_IDS[idx]
-    cache_buster = int(time.time())
-    return f"https://images.unsplash.com/photo-{photo_id}?auto=format&fit=crop&w=800&h=450&q=80&cb={cache_buster}"
+    h = resp.text
+    patrones = [
+        r'<meta[^>]+(?:property|name)=["\']og:image(?::secure_url|:url)?["\'][^>]*content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\']og:image(?::secure_url|:url)?["\']',
+        r'<meta[^>]+name=["\']twitter:image(?::src)?["\'][^>]*content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*name=["\']twitter:image(?::src)?["\']',
+    ]
+    for patron in patrones:
+        m = re.search(patron, h, re.IGNORECASE)
+        if m:
+            # Decodificar entidades HTML (&amp; -> &) para que la URL sea válida
+            return html.unescape(m.group(1).strip())
+    return ""
 
 
 def scrape_news():
@@ -138,13 +103,10 @@ def scrape_news():
         if not desc or len(desc) < 10:
             desc = f"Últimas novedades publicadas en la sección de noticias de TikPanel: {title}."
 
-        # === Imagen destacada real: leer el og:image que el panel guardó en el post ===
+        # Imagen original de la noticia: la que ya trae el propio post en su og:image
+        # (imagen de la fuente original). Si el post no tuviera imagen, se queda vacía
+        # y el artículo simplemente se publica sin imagen destacada.
         image_url = extraer_og_image(link)
-        if not image_url:
-            image_url = imagen_fallback(title)
-            print(f"  ↪ Sin og:image en el post, usando respaldo: {title[:60]}")
-        else:
-            print(f"  ✓ og:image real: {title[:50]} -> {image_url[:70]}")
 
         stable_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -174,17 +136,25 @@ def generate_rss(articles):
         fe.title(article['title'])
         fe.link(href=article['link'])
 
-        content_html = (
-            f'<p><img src="{article["image"]}" alt="{article["title"]}" style="width:100%; max-width:600px; height:auto; border-radius:8px;" /></p>'
-            f'<p>{article["description"]}</p>'
-            f'<p><a href="{article["link"]}">Leer artículo completo en TikPanel</a></p>'
-        )
+        img = article.get('image')
+        if img:
+            content_html = (
+                f'<p><img src="{img}" alt="{article["title"]}" style="width:100%; max-width:600px; height:auto; border-radius:8px;" /></p>'
+                f'<p>{article["description"]}</p>'
+                f'<p><a href="{article["link"]}">Leer artículo completo en TikPanel</a></p>'
+            )
+        else:
+            content_html = (
+                f'<p>{article["description"]}</p>'
+                f'<p><a href="{article["link"]}">Leer artículo completo en TikPanel</a></p>'
+            )
         fe.description(content_html)
-        fe.enclosure(article['image'], 0, 'image/jpeg')
+        if img:
+            fe.enclosure(img, 0, 'image/jpeg')
         fe.pubDate(article['date'].astimezone().strftime('%a, %d %b %Y %H:%M:%S %z'))
 
     fg.rss_file('feed.xml', pretty=True)
-    print(f"¡Feed regenerado usando la imagen destacada real (og:image) de cada noticia!")
+    print(f"¡Feed regenerado usando la imagen original de cada noticia!")
 
 
 if __name__ == "__main__":
